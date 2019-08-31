@@ -1,4 +1,5 @@
 #include <SFML/Graphics.hpp>
+#include <SFML/Audio.hpp>
 #include <iostream>
 #include <string>
 #include <stdlib.h>
@@ -8,35 +9,23 @@
 #include <wtypes.h>
 #include <iomanip>
 #include <sstream>
+#include <math.h>
 
-int GetDesktopResolution(char xy)
-{
-    RECT desktop;
-    const HWND hDesktop = GetDesktopWindow();
-    GetWindowRect(hDesktop, &desktop);
+int GetDesktopResolution(char xy);
 
-    int horizontal = desktop.right;
-    int vertical = desktop.bottom;
+std::string ConvertToString(float c);
 
-    if (xy == 'x') {
-        return horizontal;
-    }
-    else if (xy == 'y') {
-        return vertical;
-    }
-    else {
-        return 0;
-    }
-}
+void resetGame();
+
+//
+// START GAME
+//
 
 std::map<char, int> desktopRes = {{'x', GetDesktopResolution('x')}, {'y', GetDesktopResolution('y')}};
 
-int ballsize = 20;
-sf::Vector2f RackSize(20, 100);
-
 // True is Right and Down
 // Ball Direction
-bool lr = true;
+bool lr = false;
 bool ud = true;
 
 // Left Racket
@@ -47,79 +36,88 @@ bool lud = true;
 bool rmoving = false;
 bool rud = false;
 
-bool started = false;
-
 // Ball Speed Multiplier - 0.5 is normal.
 float spd = 0.5f;
+
+// Size of the ball (Radius)
+int ballsize = 20;
+
+// Size of Paddles
+sf::Vector2f RackSize(15, 100);
+
+// Location of the ball start.
 sf::Vector2i ballstart(desktopRes['x']/2, desktopRes['y']/2);
 
+// Score Dictionary
 std::map<char, int> score = {{'l', 0}, {'r', 0}};
 
+// Objects
 sf::Text score_text;
 sf::CircleShape pongball(10.f);
 sf::RectangleShape LRacket;
 sf::RectangleShape RRacket;
 
-
-std::string ConvertToString(float c)
-{
-    std::stringstream conv;
-    conv << std::fixed << std::setprecision(0) << c;
-    std::string converted = conv.str();
-    return converted;
-}
-
-void resetGame()
-{
-    // Left Racket
-    lmoving = false;
-    lud = true;
-    LRacket.setPosition(desktopRes['x']/12, desktopRes['y']/2);
-
-    // Right Racket
-    rmoving = false;
-    rud = false;
-    RRacket.setPosition(desktopRes['x']/12*11, desktopRes['y']/2);
-
-
-    score_text.setString(std::to_string(score['l']) + " : " + std::to_string(score['r']));
-    pongball.setRadius(ballsize/2);
-    pongball.setFillColor(sf::Color::White);
-    pongball.setOrigin(pongball.getGlobalBounds().width, pongball.getGlobalBounds().height);
-    pongball.setPosition(ballstart.x, ballstart.y+(rand() % (desktopRes['y']/4)));
-
-
-}
-
 int main()
 {
+    // Whether The Game is Started Yet.
+    bool started = false;
     bool fullscreen = true;
     bool paused = false;
+    bool musicplayed = false;
     char mode = 'm';
 
-    sf::RenderWindow window(sf::VideoMode(desktopRes['x'], desktopRes['y']), "PONG", sf::Style::Fullscreen);
+    // Background Fun.
+    bool fun = true;
+    sf::Color bgcol(0, 0, 0);
+    int frame = 0;
+
+
+    sf::RenderWindow window(sf::VideoMode(desktopRes['x'], desktopRes['y']), "PONG", (fullscreen ? sf::Style::Fullscreen : sf::Style::Resize));
 
     sf::ContextSettings settings;
     settings.antialiasingLevel = 2;
 
+// Hooray Sound Effect
+    sf::SoundBuffer Hooray;
+    if (!Hooray.loadFromFile("Assets/Cheer.wav")) {
+        std::cout << "Hooray Sound Effect Not Loaded" << std::endl;
+    }
+
+// Start Music
+    sf::Music introMusic;
+    if (!introMusic.openFromFile("Assets/ES_Detective_Work.wav")) {
+        std::cout << "Intro Music Not Loaded!" << std::endl;
+    }
+
 // Paused Screen Tint
     sf::Texture rtint;
-    if (!rtint.loadFromFile("PausedRed.png")) {
+    if (!rtint.loadFromFile("Assets/PausedRed.png")) {
         std::cout << "Pause Texture Not Loaded!" << std::endl;
     }
 
 // Roboto Font
     sf::Font Roboto;
-    if (!Roboto.loadFromFile("Roboto/Roboto-Regular.ttf")) {
-        std::cout << "Roboto Not Loaded!\n" << std::flush;
+    if (!Roboto.loadFromFile("Assets/Roboto/Roboto-Regular.ttf")) {
+        std::cout << "Roboto Not Loaded!" << std::endl;
+    }
+
+// Lexend Peta Font
+    sf::Font Lexend_Peta;
+    if (!Lexend_Peta.loadFromFile("Assets/Lexend_Peta/LexendPeta-Regular.ttf")) {
+        std::cout << "Lexend Peta Not Loaded!" << std::endl;
     }
 
 // Pause Cover
     sf::RectangleShape paused_cover;
-    sf::Vector2f rectSize(desktopRes['x'], desktopRes['y']);
-    paused_cover.setSize(rectSize);
+    sf::Vector2f coverSize(desktopRes['x'], desktopRes['y']);
+    paused_cover.setSize(coverSize);
     paused_cover.setTexture(&rtint);
 
+// Text Overlay
+    sf::RectangleShape overlay;
+    sf::Vector2f overlaySize(0, 0);
+    overlay.setSize(overlaySize);
+    overlay.setTexture(&rtint);
 
     //
     // Real Sprites
@@ -128,7 +126,7 @@ int main()
 // Pong Ball
     pongball.setRadius(ballsize/2);
     pongball.setFillColor(sf::Color::White);
-    pongball.setOrigin(pongball.getGlobalBounds().width, pongball.getGlobalBounds().height);
+    pongball.setOrigin(pongball.getGlobalBounds().width/2, pongball.getGlobalBounds().height/2);
     pongball.setPosition(ballstart.x, ballstart.y);
 
 // Left Racket
@@ -167,10 +165,7 @@ int main()
     score_text.setOrigin(score_text.getGlobalBounds().width/2, score_text.getGlobalBounds().height/2);
     score_text.setPosition(desktopRes['x']/2, floor(desktopRes['y']/3));
 
-// Title Text (& Font) (Lexend Peta)
-    sf::Font Lexend_Peta;
-    Lexend_Peta.loadFromFile("Lexend_Peta/LexendPeta-Regular.ttf");
-
+// Title Text
     sf::Text title;
     title.setFont(Lexend_Peta);
     title.setCharacterSize(80);
@@ -270,6 +265,25 @@ int main()
                             }
                             break;
 
+                    // Plus (Technically Equals) - Increase Volume
+                        case sf::Keyboard::Equal:
+                            if (sf::Listener::getGlobalVolume()+10 > 100) {
+                                sf::Listener::setGlobalVolume(100);
+                            } else {
+                                sf::Listener::setGlobalVolume(sf::Listener::getGlobalVolume()+10);
+                            }
+                            break;
+
+                    // Minus - Decrease Volume
+                        case sf::Keyboard::Hyphen:
+                            if (sf::Listener::getGlobalVolume()-10 < 0) {
+                                sf::Listener::setGlobalVolume(0);
+                            } else {
+                                sf::Listener::setGlobalVolume(sf::Listener::getGlobalVolume()-10);
+                            }
+                            break;
+
+
                     // Pause The Game
                         case sf::Keyboard::P:
                             paused = !paused;
@@ -278,6 +292,14 @@ int main()
                     // Start Game
                         case sf::Keyboard::Enter:
                             started = true;
+
+                            // Background Colors (Set To Black When Started!)
+                            fun = false;
+
+                            bgcol.r = 0;
+                            bgcol.g = 0;
+                            bgcol.b = 0;
+
                             break;
 
                     // Game Modes
@@ -352,10 +374,16 @@ int main()
                 pongball.move((lr ? spd : -spd), (ud ? spd : -spd));
             }
 
+            if (rmoving) {
+                RRacket.move(0, (rud ? spd : -spd));
+            }
+            if (lmoving) {
+                LRacket.move(0, (lud ? spd : -spd));
+            }
+
             // If it is in demo mode.
             if (mode == 'd') {
                 lmoving = true;
-                LRacket.setPosition(LRacket.getPosition().x, LRacket.getPosition().y + (lud ? -spd : spd));
                 if ((LRacket.getPosition().y > desktopRes['y'] - RackSize.y/2) || (LRacket.getPosition().y < RackSize.y/2)) {
                     lud = !lud;
                 }
@@ -364,37 +392,37 @@ int main()
             // If it is in bot(/demo) mode.
             if ((mode == 'd') || (mode == 'b')) {
                 rmoving = true;
-                RRacket.setPosition(RRacket.getPosition().x, RRacket.getPosition().y + (rud ? -spd : spd));
                 if ((RRacket.getPosition().y > desktopRes['y'] - RackSize.y/2) || (RRacket.getPosition().y < RackSize.y/2)) {
                     rud = !rud;
                 }
             }
 
-            // If it is in multiplayer(/bot) mode.
-            if ((mode == 'm') || (mode == 'b')) {
-                if (lmoving) {
-                    if (lud) {
-                        LRacket.move(0, spd);
-                    } else {
-                        LRacket.move(0, -spd);
-                    }
+            if (!(mode == 'd')) {
+                if (LRacket.getPosition().y > desktopRes['y'] - RackSize.y/2) {
+                    LRacket.move(0, -spd);
+                } else if (LRacket.getPosition().y < RackSize.y/2) {
+                    LRacket.move(0, spd);
                 }
             }
 
-            // If it is in multiplayer mode.
             if (mode == 'm') {
-                if (rmoving) {
-                    if (rud) {
-                        RRacket.move(0, spd);
-                    } else {
-                        RRacket.move(0, -spd);
-                    }
+                if (RRacket.getPosition().y > desktopRes['y'] - RackSize.y/2) {
+                    RRacket.move(0, -spd);
+                } else if (RRacket.getPosition().y < RackSize.y/2) {
+                    RRacket.move(0, spd);
                 }
             }
 
             // If the ball hits a paddle.
             if ((pongBound.intersects(LRacketBound)) || (pongBound.intersects(RRacketBound))) {
-                pongball.move((lr ? -1 : 1), 0);
+                while (true) {
+                    if ((pongBound.intersects(LRacketBound)) || (pongBound.intersects(RRacketBound))) {
+                        pongball.move((lr ? -10 : 10), 0);
+                    } else {
+                        break;
+                    }
+                    break;
+                }
                 lr = !lr;
             }
 
@@ -404,13 +432,23 @@ int main()
             }
 
             // If the Ball hits a Wall (Point Given)
-            if ((pongball.getPosition().x < pongball.getRadius()) || (pongball.getPosition().x > desktopRes['x'] - pongball.getRadius())) {
+            if ((pongball.getPosition().x < pongball.getRadius()) || (pongball.getPosition().x > desktopRes['x'])) {
                 if (pongball.getPosition().x < pongball.getRadius()) {
                     score['r']++;
                 } else if (pongball.getPosition().x > desktopRes['x'] - pongball.getRadius()) {
                     score['l']++;
                 }
 
+            // Play Hoorsy Sound
+                sf::Sound hooray;
+                hooray.setBuffer(Hooray);
+                hooray.play();
+
+                while (hooray.getStatus() == 2) {
+
+                }
+
+                lr = false;
                 resetGame();
 
             }
@@ -420,21 +458,44 @@ int main()
         // Create The Frame
         //
 
-        // Debug Info
-        speed_text.setString("Speed: " + ConvertToString(spd*2) + "\n (" + ConvertToString(pongball.getPosition().x) + ", " + ConvertToString(pongball.getPosition().y) + ")");
+    // Debug Info
+        speed_text.setString("Speed: " + ConvertToString(spd*2) + "\nVolume: " + ConvertToString(sf::Listener::getGlobalVolume()) + "\n(" + ConvertToString(pongball.getPosition().x) + ", " + ConvertToString(pongball.getPosition().y) + ")");
+
+    // Overlay Cover
+        overlaySize.x = speed_text.getGlobalBounds().width*1.1;
+        overlaySize.y = speed_text.getGlobalBounds().height*1.1;
+        overlay.setSize(overlaySize);
+
+    // Random Color Gen
+        if (!paused) {
+            if (fun) {
+                frame++;
+                if (frame == 100) {
+                    bgcol.r = (rand() % 255);
+                    bgcol.g = (rand() % 255);
+                    bgcol.b = (rand() % 255);
+                    frame = 0;
+                }
+            }
+        }
 
         // Clear The Frame
-        window.clear();
+        window.clear(bgcol);
 
         // Draw The Entities
         window.draw(LRacket);
         window.draw(RRacket);
 
         if (started) {
+            window.draw(overlay);
             window.draw(speed_text);
             window.draw(score_text);
             window.draw(pongball);
         } else {
+            if (!musicplayed) {
+                introMusic.play();
+                musicplayed = true;
+            }
             window.draw(title);
             window.draw(start);
         }
@@ -450,4 +511,53 @@ int main()
     }
 
     return 0;
+}
+
+void resetGame()
+{
+    // Left Racket
+    lmoving = false;
+    lud = true;
+    LRacket.setPosition(desktopRes['x']/12, desktopRes['y']/2);
+
+    // Right Racket
+    rmoving = false;
+    rud = false;
+    RRacket.setPosition(desktopRes['x']/12*11, desktopRes['y']/2);
+
+
+    score_text.setString(std::to_string(score['l']) + " : " + std::to_string(score['r']));
+    pongball.setRadius(ballsize/2);
+    pongball.setFillColor(sf::Color::White);
+    pongball.setOrigin(pongball.getGlobalBounds().width, pongball.getGlobalBounds().height);
+    pongball.setPosition(ballstart.x, ballstart.y+(rand() % (desktopRes['y']/4)));
+
+}
+
+std::string ConvertToString(float c)
+{
+    std::stringstream conv;
+    conv << std::fixed << std::setprecision(0) << c;
+    std::string converted = conv.str();
+    return converted;
+}
+
+int GetDesktopResolution(char xy)
+{
+    RECT desktop;
+    const HWND hDesktop = GetDesktopWindow();
+    GetWindowRect(hDesktop, &desktop);
+
+    int horizontal = desktop.right;
+    int vertical = desktop.bottom;
+
+    if (xy == 'x') {
+        return horizontal;
+    }
+    else if (xy == 'y') {
+        return vertical;
+    }
+    else {
+        return 0;
+    }
 }
